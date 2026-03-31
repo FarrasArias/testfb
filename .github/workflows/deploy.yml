@@ -1,0 +1,151 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Unity WebGL Build & Deploy Pipeline
+# Course: Pipelines & DevOps — Class 1
+#
+# What this does:
+#   1. Triggers on every push to the 'main' branch
+#   2. Checks out the repository (including LFS files)
+#   3. Restores cached Unity Library folder (saves ~5-10 min on repeat builds)
+#   4. Compiles the Unity project to WebGL using GameCI's unity-builder
+#   5. Deploys the build to GitHub Pages
+#
+# Required GitHub Secrets (Settings → Secrets and variables → Actions):
+#   UNITY_LICENSE  — Contents of your .ulf license file
+#   UNITY_EMAIL    — Your Unity account email
+#   UNITY_PASSWORD — Your Unity account password
+#
+# Required GitHub Settings:
+#   Settings → Pages → Source → "GitHub Actions"
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build and Deploy Unity WebGL
+
+on:
+  push:
+    branches:
+      - main
+  # Allow manual trigger from the GitHub Actions UI
+  workflow_dispatch:
+
+# Cancel any in-progress run if a new push comes in
+# Prevents stacking up builds during rapid iteration
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 1: Build the Unity WebGL project
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build Unity WebGL
+    runs-on: ubuntu-latest
+
+    # Make the build artifacts available to the deploy job
+    outputs:
+      artifact-name: ${{ steps.set-artifact-name.outputs.name }}
+
+    steps:
+      # ── Step 1: Checkout ────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # lfs: true downloads Git LFS files (large assets like textures, audio)
+          # Remove this if you're not using Git LFS to save time
+          lfs: true
+
+      # ── Step 2: Restore Unity Library Cache ─────────────────────────────────
+      # The Library folder contains pre-compiled assets.
+      # Caching it can save 5-15 minutes on repeat builds.
+      # The cache key changes when any asset, package, or project setting changes.
+      - name: Cache Unity Library
+        uses: actions/cache@v3
+        with:
+          path: Library
+          key: Library-WebGL-${{ hashFiles('FlappyClone/Assets/**', 'FlappyClone/Packages/**', 'FlappyClone/ProjectSettings/**') }}
+          restore-keys: |
+            Library-WebGL-
+            Library-
+
+      # ── Step 3: Build WebGL ─────────────────────────────────────────────────
+      # Uses the community GameCI unity-builder action.
+      # Documentation: https://game.ci/docs/github/builder
+      - name: Build Unity WebGL
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          # Path to the Unity project folder (relative to repo root)
+          projectPath: .
+          # Target platform
+          targetPlatform: WebGL
+          # Where to put the build output
+          buildsPath: builds
+          # Optional: specify a Unity version. If omitted, uses ProjectSettings version.
+          # unityVersion: 2022.3.20f1
+
+      # ── Step 4: Set artifact name ───────────────────────────────────────────
+      - name: Set artifact name
+        id: set-artifact-name
+        run: echo "name=WebGL-Build-${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      # ── Step 5: Upload build artifact ───────────────────────────────────────
+      # Stores the build so the deploy job can access it
+      - name: Upload WebGL Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.set-artifact-name.outputs.name }}
+          path: builds/WebGL
+          # Keep artifacts for 7 days (saves GitHub storage)
+          retention-days: 7
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2: Deploy to GitHub Pages
+  # Runs only after the 'build' job succeeds
+  # ───────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build   # This job won't start until 'build' completes successfully
+    runs-on: ubuntu-latest
+
+    # Required permissions for GitHub Pages deployment
+    permissions:
+      pages: write
+      id-token: write
+
+    # GitHub Pages environment tracking
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      # ── Step 1: Download the build artifact from the previous job ───────────
+      - name: Download WebGL Build
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: ./game
+
+      # ── Step 2: Package for GitHub Pages ────────────────────────────────────
+      - name: Upload to GitHub Pages artifact store
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./game
+
+      # ── Step 3: Deploy ───────────────────────────────────────────────────────
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      # ── Step 4: Print the deployed URL ──────────────────────────────────────
+      - name: Print deployed URL
+        run: |
+          echo "========================================"
+          echo " Game is live at:"
+          echo " ${{ steps.deploy.outputs.page_url }}"
+          echo "========================================"
+          echo ""
+          echo " Copy this URL into your Firebase portal's"
+          echo " VITE_GAME_URL environment variable!"
