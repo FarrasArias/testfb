@@ -86,18 +86,25 @@ jobs:
           # Optional: specify a Unity version. If omitted, uses ProjectSettings version.
           # unityVersion: 2022.3.20f1
 
-      # ── Step 4: Set artifact name ───────────────────────────────────────────
+      # ── Step 4: Debug — show what GameCI actually output ────────────────────
+      # This prints the real folder structure so you can verify index.html exists.
+      # Safe to remove once the pipeline is confirmed working.
+      - name: Debug - show build output structure
+        run: find builds/ -type f | sort
+
+      # ── Step 5: Set artifact name ───────────────────────────────────────────
       - name: Set artifact name
         id: set-artifact-name
         run: echo "name=WebGL-Build-${{ github.sha }}" >> $GITHUB_OUTPUT
 
-      # ── Step 5: Upload build artifact ───────────────────────────────────────
-      # Stores the build so the deploy job can access it
+      # ── Step 6: Upload build artifact ───────────────────────────────────────
+      # GameCI outputs to builds/WebGL/WebGL/ (it appends the platform name).
+      # We point at the inner folder so index.html is at the artifact root.
       - name: Upload WebGL Build
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.set-artifact-name.outputs.name }}
-          path: builds/WebGL
+          path: builds/WebGL/WebGL
           # Keep artifacts for 7 days (saves GitHub storage)
           retention-days: 7
 
