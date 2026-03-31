@@ -1,4 +1,4 @@
-using TMPro;
+﻿using TMPro;
 using UnityEngine;
 
 /// <summary>
@@ -23,6 +23,12 @@ public class ScoreManager : MonoBehaviour
     private int currentScore = 0;
     private int highScore = 0;
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // CHANGE: Track session start time and pipes passed for Firebase submission
+    // ═══════════════════════════════════════════════════════════════════════
+    private float sessionStartTime = 0f;
+    private int pipesPassedThisRound = 0;
+
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -38,12 +44,23 @@ public class ScoreManager : MonoBehaviour
     public void ResetScore()
     {
         currentScore = 0;
+        // ═══════════════════════════════════════════════════════════════════
+        // CHANGE: Reset session tracking for this new round
+        // ═══════════════════════════════════════════════════════════════════
+        pipesPassedThisRound = 0;
+        sessionStartTime = Time.time;
+
         UpdateScoreDisplay();
     }
 
     public void AddPoint()
     {
         currentScore++;
+        // ═══════════════════════════════════════════════════════════════════
+        // CHANGE: Also track pipes passed (1 point = 1 pipe)
+        // ═══════════════════════════════════════════════════════════════════
+        pipesPassedThisRound++;
+
         UpdateScoreDisplay();
     }
 
@@ -61,6 +78,18 @@ public class ScoreManager : MonoBehaviour
 
         if (finalScoreText != null)
             finalScoreText.text = $"Score: {currentScore}\nBest: {highScore}";
+
+        // ═══════════════════════════════════════════════════════════════════
+        // CHANGE: Submit score to Firebase via the REST API bridge.
+        // This sends { score, pipes, duration } to Firestore so the web
+        // portal's leaderboard, score history, and dashboards all update
+        // in real time.
+        // ═══════════════════════════════════════════════════════════════════
+        if (FirebaseManager.Instance != null)
+        {
+            int duration = Mathf.RoundToInt(Time.time - sessionStartTime);
+            FirebaseManager.Instance.SubmitScore(currentScore, pipesPassedThisRound, duration);
+        }
     }
 
     private void UpdateScoreDisplay()
