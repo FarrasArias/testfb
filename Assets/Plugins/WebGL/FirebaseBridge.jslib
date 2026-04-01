@@ -64,14 +64,6 @@ var FirebaseBridgeLib = {
         });
 
         console.log("[FirebaseBridge] Listener registered — waiting for auth from portal.");
-
-        // Check if any auth was buffered before Unity booted
-        // (see the early listener registered at the bottom of this file)
-        if (window.__fbAuthBuffered) {
-            console.log("[FirebaseBridge] Found buffered auth — forwarding to C#.");
-            handleAuth(window.__fbAuthBuffered);
-            window.__fbAuthBuffered = null;
-        }
     },
 
 
@@ -169,30 +161,12 @@ var FirebaseBridgeLib = {
 
 mergeInto(LibraryManager.library, FirebaseBridgeLib);
 
-
 /*
- * ═══════════════════════════════════════════════════════════════════════
- * EARLY LISTENER — registered immediately when Unity's JS glue code loads,
- * BEFORE C# Start() has a chance to call InitFirebaseBridge.
+ * NOTE: Unity's Emscripten toolchain only allows mergeInto() in .jslib files.
+ * No standalone executable code (IIFEs, etc.) is permitted outside of that call.
  *
- * This catches auth messages that arrive while Unity is still booting.
- * The credentials are buffered in window.__fbAuthBuffered and picked up
- * by InitFirebaseBridge when C# is ready.
- * ═══════════════════════════════════════════════════════════════════════
+ * TIMING: The portal retries sending the auth token every 2 seconds for up to
+ * 30 seconds.  By the time Unity boots and C# calls InitFirebaseBridge(), the
+ * listener is registered and the next retry from the portal will be caught.
+ * No early-buffering is needed.
  */
-(function () {
-    if (window.__fbEarlyListenerSet) return;
-    window.__fbEarlyListenerSet = true;
-
-    window.addEventListener("message", function (event) {
-        var data = event.data;
-        if (!data || data.type !== "firebase-auth") return;
-
-        // If the bridge is already initialised, the main listener handles it.
-        if (window.__firebaseBridgeInit) return;
-
-        // Otherwise buffer it for InitFirebaseBridge to pick up.
-        console.log("[FirebaseBridge:early] Buffering auth for uid:", data.uid);
-        window.__fbAuthBuffered = data;
-    });
-})();
