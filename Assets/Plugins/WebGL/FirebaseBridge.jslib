@@ -28,9 +28,6 @@ var FirebaseBridgeLib = {
      * We also check for any buffered auth that arrived before this init.
      * ────────────────────────────────────────────────────────────────────── */
     InitFirebaseBridge: function () {
-        if (window.__firebaseBridgeInit) return;   // guard against double-init
-        window.__firebaseBridgeInit = true;
-
         // Store credentials received from the portal
         if (!window.__fbAuth) {
             window.__fbAuth = { uid: null, idToken: null, displayName: null, projectId: null };
@@ -56,14 +53,31 @@ var FirebaseBridgeLib = {
             }
         }
 
-        // Register the listener for future messages
-        window.addEventListener("message", function (event) {
-            var data = event.data;
-            if (!data || data.type !== "firebase-auth") return;
-            handleAuth(data);
-        });
+        // Only register the postMessage listener once (survives scene reloads)
+        if (!window.__firebaseBridgeInit) {
+            window.__firebaseBridgeInit = true;
 
-        console.log("[FirebaseBridge] Listener registered — waiting for auth from portal.");
+            window.addEventListener("message", function (event) {
+                var data = event.data;
+                if (!data || data.type !== "firebase-auth") return;
+                handleAuth(data);
+            });
+
+            console.log("[FirebaseBridge] Listener registered — waiting for auth from portal.");
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // SCENE RELOAD FIX: When the player hits Restart, Unity reloads the
+        // scene → new FirebaseManager → new Start() → calls this again.
+        // The JS listener is already registered, but the NEW C# instance
+        // has IsAuthenticated = false.  If we already have auth credentials
+        // from a previous session, re-send them to the new C# instance.
+        // ═══════════════════════════════════════════════════════════════════
+        if (window.__fbAuth && window.__fbAuth.uid && window.__fbAuth.idToken) {
+            console.log("[FirebaseBridge] Scene reloaded — re-sending cached auth to new C# instance.");
+            var payload = JSON.stringify(window.__fbAuth);
+            SendMessage("FirebaseManager", "OnAuthReceived", payload);
+        }
     },
 
 
