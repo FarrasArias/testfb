@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: Library
-          key: Library-WebGL-${{ hashFiles('FlappyClone/Assets/**', 'FlappyClone/Packages/**', 'FlappyClone/ProjectSettings/**') }}
+          key: Library-WebGL-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
           restore-keys: |
             Library-WebGL-
             Library-
