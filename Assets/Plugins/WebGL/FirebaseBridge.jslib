@@ -22,20 +22,22 @@ var FirebaseBridgeLib = {
      * InitFirebaseBridge
      * Called once from C# (FirebaseManager.Start) to register the
      * window.addEventListener("message", ...) listener.
+     *
+     * TIMING FIX: The portal retries sending auth every 2 seconds because
+     * Unity WebGL takes several seconds to boot after the iframe HTML loads.
+     * We also check for any buffered auth that arrived before this init.
      * ────────────────────────────────────────────────────────────────────── */
     InitFirebaseBridge: function () {
         if (window.__firebaseBridgeInit) return;   // guard against double-init
         window.__firebaseBridgeInit = true;
 
         // Store credentials received from the portal
-        window.__fbAuth = { uid: null, idToken: null, displayName: null, projectId: null };
+        if (!window.__fbAuth) {
+            window.__fbAuth = { uid: null, idToken: null, displayName: null, projectId: null };
+        }
 
-        window.addEventListener("message", function (event) {
-            // Accept messages from any origin (the portal and the game are
-            // on different domains: your-site vs farrasarias.github.io).
-            var data = event.data;
-            if (!data || data.type !== "firebase-auth") return;
-
+        // Helper: process auth data and forward to C#
+        function handleAuth(data) {
             console.log("[FirebaseBridge] Received auth from portal for uid:", data.uid);
 
             window.__fbAuth.uid         = data.uid;
@@ -45,12 +47,31 @@ var FirebaseBridgeLib = {
 
             // Forward to C# — FirebaseManager.OnAuthReceived(string json)
             var payload = JSON.stringify(window.__fbAuth);
-
-            // SendMessage(gameObjectName, methodName, stringParam)
             SendMessage("FirebaseManager", "OnAuthReceived", payload);
+
+            // Send acknowledgement back to the portal so it stops retrying
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: "firebase-auth-ack" }, "*");
+                console.log("[FirebaseBridge] Sent ack to portal.");
+            }
+        }
+
+        // Register the listener for future messages
+        window.addEventListener("message", function (event) {
+            var data = event.data;
+            if (!data || data.type !== "firebase-auth") return;
+            handleAuth(data);
         });
 
         console.log("[FirebaseBridge] Listener registered — waiting for auth from portal.");
+
+        // Check if any auth was buffered before Unity booted
+        // (see the early listener registered at the bottom of this file)
+        if (window.__fbAuthBuffered) {
+            console.log("[FirebaseBridge] Found buffered auth — forwarding to C#.");
+            handleAuth(window.__fbAuthBuffered);
+            window.__fbAuthBuffered = null;
+        }
     },
 
 
@@ -147,3 +168,31 @@ var FirebaseBridgeLib = {
 };
 
 mergeInto(LibraryManager.library, FirebaseBridgeLib);
+
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════
+ * EARLY LISTENER — registered immediately when Unity's JS glue code loads,
+ * BEFORE C# Start() has a chance to call InitFirebaseBridge.
+ *
+ * This catches auth messages that arrive while Unity is still booting.
+ * The credentials are buffered in window.__fbAuthBuffered and picked up
+ * by InitFirebaseBridge when C# is ready.
+ * ═══════════════════════════════════════════════════════════════════════
+ */
+(function () {
+    if (window.__fbEarlyListenerSet) return;
+    window.__fbEarlyListenerSet = true;
+
+    window.addEventListener("message", function (event) {
+        var data = event.data;
+        if (!data || data.type !== "firebase-auth") return;
+
+        // If the bridge is already initialised, the main listener handles it.
+        if (window.__firebaseBridgeInit) return;
+
+        // Otherwise buffer it for InitFirebaseBridge to pick up.
+        console.log("[FirebaseBridge:early] Buffering auth for uid:", data.uid);
+        window.__fbAuthBuffered = data;
+    });
+})();
